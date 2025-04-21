@@ -1,0 +1,13 @@
+flask
+streamlit
+lancedb
+python-dotenv
+transformers
+torch
+numpy
+groq
+pandas
+tqdm
+requests
+beautifulsoup4
+openai

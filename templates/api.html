@@ -1,0 +1,80 @@
+{% extends "layout.html" %}
+
+{% block title %}Pet Health - API{% endblock %}
+
+{% block content %}
+<div class="api-container">
+    <h1>Pet Health API</h1>
+    
+    <div class="api-section">
+        <h2>API Overview</h2>
+        <p>The Pet Health API allows developers to integrate our pet information retrieval system into their own applications. The API provides access to the same knowledge base and AI capabilities that power the web interface.</p>
+    </div>
+    
+    <div class="api-section">
+        <h2>Endpoint</h2>
+        <div class="code-block">
+            <code>POST /api/chat</code>
+        </div>
+        <p>This endpoint accepts chat messages and returns AI-generated responses based on our pet health knowledge database.</p>
+    </div>
+    
+    <div class="api-section">
+        <h2>Request Format</h2>
+        <div class="code-block">
+<pre><code>{
+  "message": "String containing the user's question",
+  "history": [
+    {
+      "role": "user" | "assistant",
+      "content": "Message content"
+    },
+    ...
+  ]
+}</code></pre>
+        </div>
+        <p>The <code>history</code> array is optional and can be used to provide conversation context.</p>
+    </div>
+    
+    <div class="api-section">
+        <h2>Response Format</h2>
+        <div class="code-block">
+<pre><code>{
+  "response": "AI-generated response to the user's question",
+  "context": "Reference information used to generate the response"
+}</code></pre>
+        </div>
+    </div>
+    
+    <div class="api-section">
+        <h2>Example</h2>
+        <h3>Request:</h3>
+        <div class="code-block">
+<pre><code>curl -X POST https://your-domain.com/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Chó con của tôi bị ho, tôi nên làm gì?",
+    "history": []
+  }'</code></pre>
+        </div>
+        
+        <h3>Response:</h3>
+        <div class="code-block">
+<pre><code>{
+  "response": "🐶 Tên bệnh: Viêm đường hô hấp trên\n\n📍 Vị trí: Đường hô hấp, cổ họng, phổi\n\n👀 Biểu hiện: Ho, hắt hơi, sổ mũi, chảy nước mắt...",
+  "context": "Khi chó bị ho, có thể do nhiều nguyên nhân khác nhau như viêm đường hô hấp, dị vật, bệnh tim...\nNguồn: petmart.vn\nTiêu đề: Chó bị ho phải làm sao?"
+}</code></pre>
+        </div>
+    </div>
+    
+    <div class="api-section">
+        <h2>Rate Limits</h2>
+        <p>The API is currently limited to 100 requests per hour per API key. Please contact us if you need higher limits for your application.</p>
+    </div>
+    
+    <div class="api-section">
+        <h2>Getting Access</h2>
+        <p>To get access to the API, please fill out the form on our <a href="{{ url_for('contact') }}">Contact page</a>. We'll review your request and provide you with an API key if approved.</p>
+    </div>
+</div>
+{% endblock %}

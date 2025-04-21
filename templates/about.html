@@ -1,0 +1,50 @@
+{% extends "layout.html" %}
+
+{% block title %}Pet Health - About{% endblock %}
+
+{% block content %}
+<div class="about-container">
+    <h1>About Pet Health</h1>
+    
+    <div class="about-section">
+        <h2>What is Pet Health?</h2>
+        <p>Pet Health is an AI-powered assistant designed to provide information and advice about pets, particularly dogs and cats. Using advanced natural language processing and a comprehensive database of pet-related information, our chatbot can answer questions about pet care, health issues, training, and more.</p>
+    </div>
+    
+    <div class="about-section">
+        <h2>How It Works</h2>
+        <p>Pet Health uses a technique called Retrieval Augmented Generation (RAG) to provide accurate and relevant information:</p>
+        <ol>
+            <li><strong>Data Collection:</strong> We've collected and processed information from reliable pet care resources, including <a href="https://www.petmart.vn/cho-canh" target="_blank">PetMart</a>.</li>
+            <li><strong>Vector Database:</strong> This information is stored in a vector database (LanceDB) that allows for semantic search.</li>
+            <li><strong>Embedding:</strong> When you ask a question, it's converted into a mathematical representation (embedding) using a multilingual model.</li>
+            <li><strong>Retrieval:</strong> The system finds the most relevant information in the database based on your question.</li>
+            <li><strong>Generation:</strong> A large language model (Llama-3.3-70b) uses the retrieved information to generate a comprehensive answer.</li>
+        </ol>
+    </div>
+    
+    <div class="about-section">
+        <h2>Use Cases</h2>
+        <p>Pet Health can help with:</p>
+        <ul>
+            <li>Answering questions about pet health and symptoms</li>
+            <li>Providing information about different dog and cat breeds</li>
+            <li>Offering advice on pet care, training, and behavior</li>
+            <li>Suggesting solutions for common pet problems</li>
+        </ul>
+        <p><strong>Note:</strong> While Pet Health provides helpful information, it is not a substitute for professional veterinary advice. Always consult a veterinarian for serious health concerns.</p>
+    </div>
+    
+    <div class="about-section">
+        <h2>How to Use</h2>
+        <p>Using Pet Health is simple:</p>
+        <ol>
+            <li>Type your question in the chat input box</li>
+            <li>Press Enter or click the send button</li>
+            <li>Review the response and the reference information provided</li>
+            <li>Ask follow-up questions as needed</li>
+        </ol>
+        <p>For best results, be specific in your questions and provide relevant details about your pet's situation.</p>
+    </div>
+</div>
+{% endblock %}
