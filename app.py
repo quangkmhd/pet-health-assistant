@@ -1,93 +1,49 @@
-import sys
 from flask import Flask, render_template, request, jsonify, session
 import lancedb
 import os
 from dotenv import load_dotenv
-from transformers import AutoTokenizer, AutoModel
+from sentence_transformers import SentenceTransformer
 import torch
-import numpy as np
 from groq import Groq
 import requests
 import json
-from werkzeug.serving import run_simple
+from livereload import Server
 
-# Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "default_secret_key_for_development")
+app.secret_key = "123"
+app.debug = True  
 
-# Initialize Groq client
+
 groq_api_key = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=groq_api_key)
 
-# Initialize OpenRouter.ai API key
 openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
 
-# Initialize embedding model
-def load_embedding_model():
-    model_name = "intfloat/multilingual-e5-large"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModel.from_pretrained(model_name)
-    return tokenizer, model
+model = SentenceTransformer("intfloat/multilingual-e5-large")
 
-# Create embedding for query
-def get_query_embedding(query_text, tokenizer, model):
-    """
-    Create embedding for query using multilingual-e5-large model
-    """
-    # Prepare input
-    inputs = tokenizer([query_text], padding=True, truncation=True, 
-                    max_length=512, return_tensors="pt")
-    
-    # Calculate embedding
-    with torch.no_grad():
-        outputs = model(**inputs)
-        # Get embedding of [CLS] token
-        embeddings = outputs.last_hidden_state[:, 0]
-    
-    # Normalize embedding
-    embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-    
-    # Convert to numpy array
-    return embeddings[0].cpu().numpy().tolist()
+def get_query_embedding(query):
+    # Chuẩn hóa L2 embedding cho query và trả về list float
+    query_embedding = model.encode([query], normalize_embeddings=True)[0]
+    return query_embedding.tolist()
 
-# Initialize LanceDB connection
 def init_db():
-    """Initialize connection to database.
-
-    Returns:
-        LanceDB table object
-    """
     db = lancedb.connect("data/lancedb_clean")
     return db.open_table("petmart_data")
 
-def get_context(query, table, tokenizer, model, num_results=10):
-    """Search database to get relevant context.
-
-    Args:
-        query: User question
-        table: LanceDB table object
-        tokenizer: Tokenizer for text processing
-        model: Model for embedding generation
-        num_results: Number of results to return
-
-    Returns:
-        str: Combined context from relevant passages with source information
-    """
-    # Create embedding for query
-    query_embedding = get_query_embedding(query, tokenizer, model)
+def get_context(query, table, num_results=10):
+    query_embedding = get_query_embedding(query)
     
-    # Search in table
+    # Tìm kiếm trong bảng lancedb
     results = table.search(query_embedding).limit(num_results).to_pandas()
     contexts = []
 
     for _, row in results.iterrows():
-        # Get metadata
         filename = row["metadata"].get("filename", "")
         title = row["metadata"].get("title", "")
 
-        # Create source information
+        # Tạo thông tin nguồn
         source_parts = []
         if filename:
             source_parts.append(filename)
@@ -101,126 +57,84 @@ def get_context(query, table, tokenizer, model, num_results=10):
     return "\n\n".join(contexts)
 
 def get_chat_response(messages, context, model_choice="groq"):
-    """Get response from selected model.
 
-    Args:
-        messages: Chat history
-        context: Context from database
-        model_choice: Which model to use ("groq" or "openrouter")
-
-    Returns:
-        str: Model response
-    """
     system_prompt = f"""
-    Act like a professional veterinary assistant and pet health advisor.
-You have supported thousands of pet owners over the past 15 years. You specialize in interpreting symptoms, triaging based on urgency, and guiding pet owners with accurate, step-by-step advice using evidence-based veterinary knowledge. You are fluent in Vietnamese and communicate with warmth and empathy.
+    Bạn là một trợ lý thú y chuyên nghiệp và cố vấn sức khỏe vật nuôi giàu kinh nghiệm, đã hỗ trợ hàng ngàn chủ nuôi suốt 15 năm qua. 
+    Bạn giỏi lắng nghe, giải thích dễ hiểu, đưa ra các bước hành động cụ thể dựa trên kiến thức thú y cập nhật, có khả năng giải thích thân thiện như bác sĩ, 
+    đồng thời trình bày chuyên nghiệp như ChatGPT.
 
-🎯 Objective:
-When a user describes symptoms of their pet in Vietnamese, your job is to return a complete, structured, easy-to-understand diagnostic report — even when information is incomplete. Your response should help the pet owner:
+🚩 Nhiệm vụ chính:
+Khi người dùng mô tả triệu chứng của thú cưng bằng tiếng Việt, hãy phản hồi bằng một bản chẩn đoán đầy đủ, trình bày đẹp mắt, chia phần rõ ràng bằng biểu tượng cảm xúc, giúp chủ nuôi:
 
-Understand what might be wrong with their pet.
+Hiểu rõ bệnh có thể là gì
 
-Know what to do at home immediately.
+Biết nên xử lý thế nào tại nhà
 
-Know when to visit a veterinarian.
+Nhận diện lúc nào cần đi khám gấp
 
-Receive follow-up questions if more info is needed.
+Nhận thêm các câu hỏi chuyên sâu nếu cần bổ sung thông tin
 
-🧠 Reasoning Strategy:
-Based on the complexity of the symptoms, automatically combine one or more of the following cognitive tools:
+🧠 Cách xử lý thông minh (áp dụng tự động):
+🔗 Chain-of-Thought reasoning để giải thích từng bước
 
-🔗 Chain-of-Thought: Think step-by-step before concluding.
+🧠 ReAct + Reflexion: Quan sát → Phân tích → Suy xét → Hiệu chỉnh
 
-🧠 ReAct + Reflexion: Observe → Diagnose → Reflect → Refine.
+📊 PAL-style logic để xử lý nhiều triệu chứng
 
-🧱 Prompt Chaining: Break into subtasks:
+🧱 Prompt-chaining chia nhỏ tác vụ:
 
-Step 1: Symptom classification
+Phân loại triệu chứng
 
-Step 2: Potential diseases
+Liệt kê bệnh có thể
 
-Step 3: Risk and urgency level
+Đánh giá rủi ro
 
-Step 4: Home vs Clinic actions
+Khuyến nghị hành động rõ ràng
 
-📊 PAL (Program-Aided Language): Use structured pseudo-code logic to determine outcomes, especially for multi-symptom cases.
+📝 Cấu trúc phản hồi tiêu chuẩn (bắt buộc tuân thủ):
+Sử dụng gạch đầu dòng, biểu tượng cảm xúc, trình bày giống ChatGPT. Văn phong nhẹ nhàng như một người bác sĩ thú y tận tâm nói chuyện trực tiếp với chủ nuôi, 
+không sử dụng **, ## các kí tự đặc biệt khác ở đầu câu.
 
-📋 Response Format in Vietnamese (bullet-pointed with emojis):
+🐶 Các bệnh có thể gặp:  
+1. [Tên bệnh 1] – 📈 Mức độ: Trung bình/Cao  
+   👉 Dấu hiệu: …  
+   👉 Vì sao có thể mắc: …  
 
-Hãy luôn giữ văn phong gần gũi, dễ hiểu, không dùng từ chuyên môn phức tạp.
+2. [Tên bệnh 2] – 📈 Mức độ: …  
+   👉 Dấu hiệu: …  
+   👉 Vì sao có thể mắc: …  
 
-🐶 Tên bệnh:
-(Tên các bệnh phổ biến nhất dựa trên mô tả triệu chứng)
+3. [Tên bệnh 3] (nếu cần) – 📈 Mức độ: …  
+   👉 Dấu hiệu: …  
+   👉 Vì sao có thể mắc: …  
 
-📍 Vị trí:
-(Bộ phận hoặc cơ quan bị ảnh hưởng)
-
-👀 Biểu hiện:
-(Các triệu chứng rõ ràng và đặc trưng, càng chi tiết càng tốt)
-
-📈 Mức độ:
-(Nhẹ / Trung bình / Nặng — ảnh hưởng tổng thể ra sao)
-
-🍽️ Ăn uống:
-(Có thay đổi gì về khẩu vị, lượng nước, tần suất ăn uống không?)
-
-💡 Nguyên nhân:
-(Những nguyên nhân thường gặp và yếu tố nguy cơ)
-
-🧼 Khuyến nghị:
-(Chủ nuôi cần làm gì ngay bây giờ tại nhà)
-
-🏠 Hướng xử lý tại nhà:
-(Chi tiết từng bước chăm sóc tại nhà)
-
-⏳ Thời gian hồi phục trung bình:
-(Xác định khoảng thời gian nếu được chăm sóc đúng cách)
-
-🔁 Khả năng tái phát & phòng tránh:
-(Các yếu tố dẫn đến tái phát và cách ngăn ngừa)
-
-🧑‍⚕️ Phác đồ điều trị tiêu chuẩn:
-(Tên thuốc, liều dùng, xét nghiệm, và những lưu ý đặc biệt)
-
-🧑‍⚕️ Khi nào cần đi khám:
-(Dấu hiệu cảnh báo cần đưa thú cưng đến bác sĩ càng sớm càng tốt)
-
+📍 Vị trí có thể ảnh hưởng:  
+👀 Các biểu hiện đã ghi nhận:  
+🍽️ Tình trạng ăn uống:  
+💡 Nguyên nhân phổ biến:  
+🧼 Khuyến nghị chăm sóc:  
+🏠 Hướng dẫn chăm sóc tại nhà theo từng bước:  
+⏳ Thời gian hồi phục (ước tính):  
+🔁 Nguy cơ tái phát & cách phòng tránh:  
+🧑‍⚕️ Phác đồ điều trị phổ biến (theo từng khả năng bệnh):  
+🧑‍⚕️ Khi nào cần đến bác sĩ thú y:  
 💬 Lời khuyên:
-(Một lời nhắn nhẹ nhàng, thực tế và trấn an tinh thần chủ nuôi)
 
-💬 Follow-up Questions (nếu thông tin chưa đủ):
-Nếu triệu chứng mô tả quá mơ hồ hoặc không đầy đủ để đưa ra chẩn đoán, hãy đưa ra một danh sách các câu hỏi ngắn gọn, dễ hiểu, tập trung vào:
 
-Thời gian phát bệnh
+❓ Hảy trả lời câu hỏi sau đây để PET HEALTH biết thêm thông tin về bệnh để có thể đưa ra bệnh chính sác nhất:
+Dựa vào thông tin ban đầu, bạn cần đưa ra 10 câu hỏi dạng Có/Không giúp người dùng xác định xem PET có thể đang mắc một bệnh cụ thể nào đó. có ví dụ minh họa,:
 
-Các triệu chứng cụ thể hơn (ví dụ: sốt? ho? tiêu chảy?...)
 
-Hành vi ăn uống / ngủ nghỉ
-
-Các bệnh nền, tiền sử tiêm phòng
-
-Thú cưng có ra ngoài gần đây không?
-
-Loài, tuổi, cân nặng, giống thú cưng
-
-📌 Sau mỗi câu hỏi, kèm một ví dụ cụ thể để người dùng dễ hình dung.
-
-🔍 Extra Notes:
-
-Nếu có nhiều khả năng chẩn đoán, liệt kê top 2–3 bệnh phổ biến, kèm mức độ khẩn cấp.
-
-Không được đoán bừa. Nếu không chắc chắn, hãy nói thẳng và đề nghị đưa thú cưng đến phòng khám.
-
-Giữ tone thân thiện, nhẹ nhàng như người hướng dẫn tận tâm.
-
-Take a deep breath and work on this problem step-by-step.
-
+⚠️ Lưu ý quan trọng:
+Luôn đưa ra câu trả lời chi tiết đầy đủ, rõ ràng cho từng phần, không ngắn gọn, không bao giờ đoán bừa. Nếu nghi ngờ, hãy khuyên đi khám.
+Luôn viết bằng ngôn ngữ gần gũi, giải thích dễ hiểu.
+Phản hồi phải trông "xịn" như một bác sĩ, nhưng dễ tiếp cận như người bạn đáng tin cậy.
+🔍 Luôn nhấn mạnh bạn không thay thế bác sĩ thú y thực thụ. Điều chỉnh phản hồi theo từng loài (chó, mèo, v.v.).
     
     Ngữ cảnh:
     {context}
     """
 
-    # Prepare messages with context
     formatted_messages = [{"role": "system", "content": system_prompt}]
     
     for message in messages:
@@ -228,18 +142,18 @@ Take a deep breath and work on this problem step-by-step.
     
     try:
         if model_choice == "groq":
-            # Use Groq's Llama-3.3-70b model (faster but paid)
+            # Sử dụng mô hình Llama-3.3-70b của Groq (nhanh hơn nhưng tốn phí)
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=formatted_messages,
                 temperature=0.1,
-                max_tokens=1024,
+                max_tokens= 2048,
                 top_p=1
             )
             return response.choices[0].message.content
             
         else:  # model_choice == "openrouter"
-            # Use OpenRouter.ai's DeepSeek Chat model (slower but free)
+            # Sử dụng mô hình DeepSeek Chat của OpenRouter.ai (chậm hơn nhưng miễn phí)
             headers = {
                 "Authorization": f"Bearer {openrouter_api_key}",
                 "Content-Type": "application/json"
@@ -249,7 +163,7 @@ Take a deep breath and work on this problem step-by-step.
                 "model": "deepseek/deepseek-chat-v3-0324:free",
                 "messages": formatted_messages,
                 "temperature": 0.1,
-                "max_tokens": 1024,
+                "max_tokens": 2048,
                 "top_p": 1.0
             }
             
@@ -267,15 +181,24 @@ Take a deep breath and work on this problem step-by-step.
     except Exception as e:
         return f"Error when calling API: {str(e)}"
 
-# Load models and database
-tokenizer, model = load_embedding_model()
 table = init_db()
+
+# Khởi tạo dữ liệu đánh giá sao
+RATINGS_FILE = 'data/ratings.json'
+if os.path.exists(RATINGS_FILE):
+    with open(RATINGS_FILE, 'r') as f:
+        try:
+            ratings_data = json.load(f)
+        except json.JSONDecodeError:
+            ratings_data = {'count': 0, 'total': 0}
+else:
+    ratings_data = {'count': 0, 'total': 0}
 
 @app.route('/')
 def index():
-    # Initialize model choice in session if not present
+    # Khởi tạo tùy chọn mô hình trong session nếu chưa có
     if 'model_choice' not in session:
-        session['model_choice'] = 'groq'  # Default to Groq
+        session['model_choice'] = 'groq'  # Mặc định là Groq
     return render_template('index.html', model_choice=session['model_choice'])
 
 @app.route('/about')
@@ -313,18 +236,25 @@ def set_model():
 
 @app.route('/chat', methods=['POST'])
 def chat():
+    # Lấy dữ liệu JSON từ client
     data = request.json
     query = data.get('message', '')
     chat_history = data.get('history', [])
-    model_choice = session.get('model_choice', 'groq')
+    # Lấy model_choice từ client gửi lên, nếu hợp lệ thì override session
+    client_model = data.get('model_choice')
+    if client_model in ['groq', 'openrouter']:
+        model_choice = client_model
+        session['model_choice'] = client_model
+    else:
+        model_choice = session.get('model_choice', 'groq')
     
-    # Get context from database
-    context = get_context(query, table, tokenizer, model)
+    # Lấy ngữ cảnh từ cơ sở dữ liệu
+    context = get_context(query, table)
     
-    # Get response from selected model
+    # Lấy phản hồi từ mô hình đã chọn
     response = get_chat_response(chat_history + [{"role": "user", "content": query}], context, model_choice)
     
-    # Update session history
+    # Cập nhật lịch sử phiên chat
     if 'chat_history' not in session:
         session['chat_history'] = []
     
@@ -335,30 +265,44 @@ def chat():
     
     return jsonify({
         'response': response,
+        'model_used': model_choice,
         'context': context
     })
 
+@app.route('/rating', methods=['GET'])
+def get_rating():
+    """Trả về đánh giá trung bình và số lượng đánh giá."""
+    avg = ratings_data['total'] / ratings_data['count'] if ratings_data['count'] > 0 else 0
+    return jsonify({'average': avg, 'count': ratings_data['count']})
+
+@app.route('/rate', methods=['POST'])
+def rate():
+    """Nhận đánh giá của người dùng và cập nhật trung bình."""
+    data = request.json
+    rating = int(data.get('rating', 0))
+    if rating < 1 or rating > 5:
+        return jsonify({'status': 'error', 'message': 'Rating không hợp lệ'}), 400
+    ratings_data['total'] += rating
+    ratings_data['count'] += 1
+    avg = ratings_data['total'] / ratings_data['count']
+    # Lưu vào file
+    with open(RATINGS_FILE, 'w') as f:
+        json.dump(ratings_data, f)
+    return jsonify({'average': avg, 'count': ratings_data['count']})
+
 if __name__ == '__main__':
-    # Configure Flask to ignore site-packages when watching for changes
-    extra_files = None
-    if app.debug:
-        # Get only project files, not packages from site-packages
-        import os
-        extra_dirs = ['templates/', 'static/']
-        extra_files = []
-        for extra_dir in extra_dirs:
-            for dirname, dirs, files in os.walk(extra_dir):
-                for filename in files:
-                    filename = os.path.join(dirname, filename)
-                    if os.path.isfile(filename):
-                        extra_files.append(filename)
     
-    # Run with custom reloader configuration
-    run_simple(
-        '127.0.0.1', 
-        5000, 
-        app,
-        use_reloader=app.debug,
-        use_debugger=app.debug,
-        extra_files=extra_files
+    # Khởi tạo livereload server
+    server = Server(app.wsgi_app)
+    
+    # Theo dõi các file và thư mục
+    server.watch('*.css')  # Theo dõi tất cả file trong thư mục templates/
+    server.watch('*.html')    # Theo dõi tất cả file trong thư mục static/
+    server.watch('*.py')        # Theo dõi tất cả file Python trong thư mục hiện tại
+    
+    # Chạy server với livereload
+    server.serve(
+        host='127.0.0.1',
+        port=5000,
+        debug=True  # Kích hoạt chế độ debug
     )

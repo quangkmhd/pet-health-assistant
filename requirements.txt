@@ -3,6 +3,9 @@ streamlit
 lancedb
 python-dotenv
 transformers
+sentence_transformers
+langchain_text_splitters
+langchain
 torch
 numpy
 groq

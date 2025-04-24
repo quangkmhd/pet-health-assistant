@@ -7,84 +7,61 @@ from tqdm import tqdm
 import lancedb
 from dotenv import load_dotenv
 from lancedb.pydantic import LanceModel, Vector
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer
+from sentence_transformers import SentenceTransformer
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 import torch
 import numpy as np
 
 load_dotenv()
 
-# --------------------------------------------------------------
-# Cài đặt mô hình Hugging Face và tokenizer
-# --------------------------------------------------------------
-
 # Tải mô hình và tokenizer từ huggingface
+# Tải mô hình
 model_name = "intfloat/multilingual-e5-large"
+model = SentenceTransformer(model_name)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModel.from_pretrained(model_name)
 
 # Số tokens tối đa cho mỗi chunk
 MAX_TOKENS = 512
 
-# --------------------------------------------------------------
-# Hàm embedding sử dụng mô hình multilingual-e5-large
-# --------------------------------------------------------------
-
-def get_embeddings(texts, batch_size=8):
+def get_embeddings(texts, batch_size=8, show_progress=True, save_path=None):
     """
-    Hàm tạo embedding cho văn bản sử dụng mô hình multilingual-e5-large
+    Hàm tạo embedding cho văn bản sử dụng mô hình multilingual-e5-large với SentenceTransformer
     """
-    all_embeddings = []
     
-    for i in tqdm(range(0, len(texts), batch_size), desc="Embedding"):
-        batch_texts = texts[i:i+batch_size]
-        
-        # Chuẩn bị input cho mô hình
-        inputs = tokenizer(batch_texts, padding=True, truncation=True, 
-                         max_length=512, return_tensors="pt")
-        
-        # Chuyển đến GPU nếu có
-        if torch.cuda.is_available():
-            inputs = {k: v.to("cuda") for k, v in inputs.items()}
-            model.to("cuda")
-        
-        # Tính embedding
-        with torch.no_grad():
-            outputs = model(**inputs)
-            # Lấy embedding của token [CLS] (đầu tiên)
-            embeddings = outputs.last_hidden_state[:, 0]
-            
-        # Chuẩn hóa embedding
-        embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-        
-        # Chuyển về CPU và numpy
-        embeddings_np = embeddings.cpu().numpy()
-        all_embeddings.extend(embeddings_np.tolist())
+    # Điều chỉnh batch_size dựa trên bộ nhớ GPU, dùng google colab chạy để đc sử dụng gpu
+    # if torch.cuda.is_available():
+    #     total_memory = torch.cuda.get_device_properties(0).total_memory
+    #     batch_size = min(batch_size, int(total_memory // (512 * 1024 * 4)))
     
-    return all_embeddings
+    embeddings = model.encode(
+        texts,
+        batch_size=batch_size,
+        show_progress_bar=show_progress, # Hiển thị thanh tiến trình.
+        normalize_embeddings=True, #Chuẩn hóa L2 embedding.
+        device="cuda" if torch.cuda.is_available() else "cpu"
+    )
+    
+    return embeddings.tolist()
 
-# --------------------------------------------------------------
+
 # Triển khai chunking đơn giản
-# --------------------------------------------------------------
-
 def chunk_text(text, max_tokens=512, overlap=50):
     """
-    Chia nhỏ văn bản thành các đoạn với số lượng token tối đa và độ chồng lấp
+    Chia nhỏ văn bản thành các đoạn sử dụng RecursiveCharacterTextSplitter từ langchain
     """
-    # Tokenize văn bản
-    tokens = tokenizer.encode(text, add_special_tokens=False)
+    if not isinstance(text, str) or not text.strip():
+        return []
+    
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=max_tokens, 
+        chunk_overlap=overlap,
+        length_function=lambda x: len(tokenizer.encode(x, add_special_tokens=False)),
+        separators=["\n\n", "\n", ". ", " ", ""],  # Ưu tiên chia theo đoạn, câu
+    )
     
     # Chia văn bản thành các đoạn
-    chunks = []
-    for i in range(0, len(tokens), max_tokens - overlap):
-        # Lấy tokens cho chunk
-        chunk_tokens = tokens[i:i + max_tokens]
-        
-        # Chuyển tokens thành text
-        chunk_text = tokenizer.decode(chunk_tokens, skip_special_tokens=True)
-        
-        # Bỏ qua chunk quá ngắn
-        if len(chunk_tokens) > 50:
-            chunks.append(chunk_text)
+    chunks = splitter.split_text(text)
     
     return chunks
 
@@ -100,23 +77,18 @@ db = lancedb.connect(LANCEDB_PATH)
 # Kích thước vector của mô hình multilingual-e5-large
 VECTOR_SIZE = 1024
 
-# Định nghĩa schema metadata
-class ChunkMetadata(LanceModel):
-    """
-    Các trường phải được sắp xếp theo thứ tự bảng chữ cái.
-    Đây là yêu cầu của triển khai Pydantic.
-    """
-    filename: str | None
-    title: str | None
-
-# Định nghĩa schema chính
-class Chunks(LanceModel):
-    text: str
-    vector: Vector(VECTOR_SIZE)
-    metadata: ChunkMetadata
+# Định nghĩa schema cho bảng LanceDB
+schema = {
+    "text": str,
+    "vector": Vector(VECTOR_SIZE),
+    "metadata": {
+        "filename": str | None,
+        "title": str | None
+    }
+}
 
 # Tạo bảng trong LanceDB
-table = db.create_table("petmart_data", schema=Chunks, mode="overwrite")
+table = db.create_table("petmart_data", schema=schema, mode="overwrite")
 
 # --------------------------------------------------------------
 # Tìm và xử lý tất cả file JSON trong thư mục petmart_data
@@ -128,48 +100,41 @@ print(f"Tìm thấy {len(json_files)} file JSON để xử lý")
 
 # Danh sách lưu tất cả các chunk đã xử lý
 all_processed_chunks = []
-
 # Tổng số chunk được tạo
 total_chunks = 0
 
 # Xử lý từng file
 for json_file in tqdm(json_files, desc="Đang xử lý file"):
     try:
-        # Đọc file JSON
         with open(json_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        # Lấy filename và title
         filename = os.path.basename(json_file)
         title = data.get("title", "")
         
-        # Kết hợp nội dung văn bản từ dữ liệu JSON
+        
         content = "\n".join(data.get("content", []))
         
-        # Bỏ qua file có nội dung quá ngắn
-        if len(content) < 50:
-            print(f"Bỏ qua file {filename}: nội dung quá ngắn")
-            continue
         
-        # Chia văn bản thành các đoạn
         chunks = chunk_text(content, max_tokens=MAX_TOKENS)
         
         print(f"File {filename}: {len(chunks)} chunks được tạo")
         total_chunks += len(chunks)
         
         # Chuẩn bị chunks cho bảng
-        file_processed_chunks = [
-            {
-                "text": chunk,
-                "metadata": {
-                    "filename": filename,
-                    "title": title,
-                },
+        file_chunks = []
+        for chunk in chunks:
+            chunk_data = {
+                "text": chunk,                  
+                "vector": None,                   
+                "metadata": {                    
+                    "filename": filename,        
+                    "title": title                
+                }
             }
-            for chunk in chunks
-        ]
+            file_chunks.append(chunk_data)
         
-        all_processed_chunks.extend(file_processed_chunks)
+        all_processed_chunks.extend(file_chunks)
         
     except Exception as e:
         print(f"Lỗi khi xử lý file {json_file}: {str(e)}")
@@ -181,23 +146,21 @@ for json_file in tqdm(json_files, desc="Đang xử lý file"):
 print(f"Tổng số chunks cần embedding: {len(all_processed_chunks)}")
 print(f"Tổng số chunks được tạo từ {len(json_files)} file: {total_chunks}")
 
-# Lấy văn bản từ các chunk
-texts = [chunk["text"] for chunk in all_processed_chunks]
+# Lấy văn bản và tạo embedding
+texts = []
+for chunk in all_processed_chunks:
+    texts.append(chunk["text"])
 
-# Tạo embedding
 embeddings = get_embeddings(texts)
 
-# Thêm embedding vào chunks
-for i, embedding in enumerate(embeddings):
-    all_processed_chunks[i]["vector"] = embedding
+# Gán embedding vào chunks
+for i in range(len(embeddings)):
+    all_processed_chunks[i]["vector"] = embeddings[i]
 
 # Thêm chunks vào bảng LanceDB
 print("Đang thêm chunks vào LanceDB...")
 table.add(all_processed_chunks)
 
-# --------------------------------------------------------------
-# Hiển thị thông tin về bảng
-# --------------------------------------------------------------
 
 print("Hoàn thành việc xử lý và lưu trữ dữ liệu")
 print(f"Tổng số chunks đã lưu: {table.count_rows()}")

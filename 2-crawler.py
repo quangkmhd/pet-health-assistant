@@ -15,11 +15,10 @@ class FirecrawlApp:
         self.crawled_links_file = os.path.join(storage_dir, "crawled_links.json")
         self.crawled_links = set()
         
-        # Tạo thư mục lưu trữ nếu chưa tồn tại
         if not os.path.exists(storage_dir):
             os.makedirs(storage_dir)
         
-        # Thiết lập logging với xử lý encoding
+        # Thiết lập logging với xử lý encoding, theo dõi hoạt động của chương trình
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
@@ -79,10 +78,10 @@ class FirecrawlApp:
         except Exception as e:
             self.safe_log("error", f"Loi khi luu danh sach lien ket da cao: {e}")
     
-    def _get_domain_from_url(self, url):
-        """Trích xuất tên miền từ URL."""
-        parsed_url = urlparse(url)
-        return parsed_url.netloc
+    # def _get_domain_from_url(self, url):
+    #     """Trích xuất tên miền từ URL."""
+    #     parsed_url = urlparse(url)
+    #     return parsed_url.netloc
     
     def _generate_filename(self, url):
         """Tạo tên file từ URL."""
@@ -111,10 +110,8 @@ class FirecrawlApp:
                 self.safe_log("warning", f"Khong the truy cap URL {url} - Ma trang thai: {response.status_code}")
                 return False
             
-            # Phân tích HTML với BeautifulSoup
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Chỉ lấy nội dung từ thẻ p
             paragraphs = soup.find_all('p')
             text_content = [p.get_text(strip=True) for p in paragraphs]
             
@@ -201,7 +198,6 @@ class FirecrawlApp:
 
 # Sử dụng FirecrawlApp
 if __name__ == "__main__":
-    # Khởi tạo ứng dụng
     crawler = FirecrawlApp(storage_dir="petmart_data")
     
     # Cào dữ liệu từ file JSON

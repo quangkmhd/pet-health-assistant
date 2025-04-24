@@ -5,21 +5,7 @@ import os
 import json
 from tqdm import tqdm
 
-# --------------------------------------------------------------
-# Basic PDF extraction
-# --------------------------------------------------------------
 
-
-
-# --------------------------------------------------------------
-# Scrape multiple pages using the sitemap
-# --------------------------------------------------------------
-
-
-
-# --------------------------------------------------------------
-# Chỉ lấy các liên kết có class="plain" từ trang web petmart.vn
-# --------------------------------------------------------------
 
 def get_plain_links(base_url, num_pages=50, existing_links=None):
     """
@@ -38,9 +24,7 @@ def get_plain_links(base_url, num_pages=50, existing_links=None):
     all_plain_links = []
     new_links_count = 0
     
-    # Tạo thanh tiến độ cho việc thu thập liên kết
     for page in tqdm(range(1, num_pages + 1), desc="Thu thập liên kết từ các trang"):
-        # Tạo URL cho từng trang
         if page == 1:
             url = base_url
         else:
@@ -56,18 +40,15 @@ def get_plain_links(base_url, num_pages=50, existing_links=None):
                 print(f"Không thể truy cập trang {url}. Mã trạng thái: {response.status_code}")
                 break
                 
-            # Phân tích cú pháp HTML
             soup = BeautifulSoup(response.content, 'html.parser')
             
-            # Tìm tất cả thẻ a có class="plain"
             plain_links = soup.find_all('a', class_='plain')
             
-            # Lấy thuộc tính href từ các thẻ a tìm được
             page_new_links = 0
             for link in plain_links:
                 if 'href' in link.attrs:
                     url = link['href']
-                    # Kiểm tra nếu liên kết chưa tồn tại thì thêm vào
+                    
                     if url not in existing_links and url not in all_plain_links:
                         all_plain_links.append(url)
                         new_links_count += 1
@@ -109,14 +90,9 @@ def main(base_url="https://www.petmart.vn/cho-canh", num_pages=50):
     #   base_url: URL cơ sở để bắt đầu thu thập
     #   num_pages: Số trang tối đa cần duyệt qua
     """
-    print("=" * 50)
-    print("CÔNG CỤ CÀO LIÊN KẾT")
-    print("=" * 50)
     print("Chú ý: Tool này chỉ thu thập và lưu trữ các liên kết.")
     print("Để cào dữ liệu từ các liên kết, hãy sử dụng extraction_helper.py sau khi chạy xong.")
-    print("=" * 50)
     
-    # Đường dẫn đến file JSON lưu trữ liên kết
     links_file_path = "plain_links.json"
     
     # Đọc danh sách liên kết đã tồn tại
@@ -154,6 +130,5 @@ def main(base_url="https://www.petmart.vn/cho-canh", num_pages=50):
         print("Không tìm thấy liên kết nào có class='plain'")
 
 if __name__ == "__main__":
-    # Chạy hàm main với các tham số mặc định
     main()
 
