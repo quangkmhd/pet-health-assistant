@@ -6,12 +6,19 @@
     <title>{% block title %}Pet Chatbot{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/chatgpt-style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    
 </head>
 <body>
     <div class="app-container">
         {% block content %}{% endblock %}
     </div>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    
+  <!-- LiveReload sẽ chèn script này để lắng nghe thay đổi file -->
+  <script src="//localhost:35729/livereload.js?snipver=1"></script>
+  
     {% block scripts %}{% endblock %}
+
+    
 </body>
 </html>

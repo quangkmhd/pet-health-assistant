@@ -30,12 +30,19 @@
     color: var(--text-color);
     line-height: 1.6;
     height: 100vh;
-    overflow: hidden;
+    overflow-y: auto;
+    position: relative;
+  }
+  
+  html, body {
+    height: 100%;
+    overflow-y: auto;
   }
   
   .app-container {
     height: 100vh;
     width: 100%;
+    overflow-y: auto;
   }
   
   /* Chat container */
@@ -164,7 +171,7 @@
   }
   
   .chat-header {
-    padding: 15px 20px;
+    padding: 0px 20px;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     justify-content: space-between;
@@ -324,18 +331,20 @@
   
   .message {
     display: flex;
-    padding: 20px;
+    padding: 30px 100px;
     gap: 20px;
   }
   
   .user-message {
     background-color: var(--user-message-bg);
     color: var(--user-text);
+    padding-right: auto;
   }
   
   .bot-message {
     background-color: var(--bot-message-bg);
     color: var(--bot-text);
+    width: 100%;
   }
   
   .message-avatar {
@@ -386,18 +395,18 @@
   }
   
   .chat-input-container {
-    padding: 20px;
     border-top: 1px solid var(--border-color);
     background-color: var(--primary-bg);
+    padding: 10px 100px;
   }
-  
+
   .chat-input-wrapper {
     display: flex;
     align-items: center;
     background-color: var(--primary-bg);
     border: 1px solid var(--border-color);
     border-radius: 8px;
-    padding: 8px 15px;
+    padding: 6px 10px;
     box-shadow: var(--shadow);
   }
   
@@ -432,10 +441,10 @@
     border: none;
     background: transparent;
     padding: 10px 0;
-    font-size: 16px;
+    font-size: 14px;
     outline: none;
     resize: none;
-    max-height: 200px;
+    max-height: 80px;
     overflow-y: auto;
     font-family: inherit;
   }
@@ -662,7 +671,7 @@
     }
   
     .message {
-      padding: 15px;
+      padding: 10px;
     }
   
     .chat-input-container {
@@ -670,3 +679,206 @@
     }
   }
   
+  /* Cập nhật style cho hệ thống đánh giá */
+  .rating-container {
+    margin-top: 15px;
+    text-align: center;
+    padding: 10px;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+  }
+  
+  .rating-container #star-rating {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 5px;
+  }
+  
+  .rating-container #star-rating .star {
+    font-size: 24px;
+    color: #e0e0e0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .rating-container #star-rating .star.filled {
+    color: #ffcc00;
+  }
+  
+  .rating-container #star-rating .star.hover {
+    color: #ffdd44;
+    transform: scale(1.1);
+  }
+  
+  .rating-container .rating-info {
+    font-size: 14px;
+    color: #b0b0b0;
+    margin-top: 5px;
+  }
+  
+  .rating-thanks {
+    position: absolute;
+    bottom: -30px;
+    left: 0;
+    right: 0;
+    background-color: rgba(40, 167, 69, 0.8);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 4px;
+    animation: fadeIn 0.3s ease-in-out;
+    text-align: center;
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  /* Định dạng model indicator ở header */
+  .header-model-indicator {
+    margin-left: 10px;
+    font-size: 14px;
+    color: var(--light-text);
+  }
+  
+  /* CSS cho trang thông tin thú cưng */
+  .pet-info-container {
+    max-width: 800px;
+    margin: 30px auto;
+    padding: 20px;
+    background-color: var(--primary-bg);
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    height: auto;
+    min-height: 200px;
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  .pet-info-header {
+    text-align: center;
+    margin-bottom: 30px;
+  }
+
+  .pet-info-header h1 {
+    font-size: 28px;
+    color: var(--text-color);
+    margin-bottom: 10px;
+  }
+
+  .pet-info-header p {
+    color: var(--light-text);
+    font-size: 16px;
+  }
+
+  .pet-info-form {
+    padding: 20px;
+  }
+
+  .form-group {
+    margin-bottom: 20px;
+  }
+
+  .form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+
+  .form-group input, 
+  .form-group select,
+  .form-group textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 16px;
+    transition: border-color 0.3s;
+  }
+
+  .form-group input:focus,
+  .form-group select:focus,
+  .form-group textarea:focus {
+    border-color: var(--primary-button);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.1);
+  }
+
+  .form-group textarea {
+    min-height: 100px;
+    resize: vertical;
+  }
+
+  .form-actions {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 30px;
+  }
+
+  .form-actions .save-btn,
+  .form-actions .cancel-btn {
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: var(--transition);
+  }
+
+  .form-actions .save-btn {
+    background-color: var(--primary-button);
+    color: white;
+    border: none;
+  }
+
+  .form-actions .save-btn:hover {
+    background-color: var(--primary-button-hover);
+  }
+
+  .form-actions .cancel-btn {
+    background-color: transparent;
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .form-actions .cancel-btn:hover {
+    background-color: var(--secondary-bg);
+  }
+
+  /* Thêm menu cho pet info */
+  .pet-info-link {
+    text-decoration: none;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    transition: var(--transition);
+  }
+
+  .pet-info-link:hover {
+    background-color: var(--secondary-bg);
+  }
+
+  .pet-info-link i {
+    color: var(--primary-button);
+  }
+
+  .pet-info-badge {
+    display: inline-block;
+    background-color: var(--primary-button);
+    color: white;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-left: 5px;
+  }
+
