@@ -1,16 +1,27 @@
+# Web Framework and Interface
 flask
-streamlit
+livereload
+
+# Vector Database and Data Processing
 lancedb
-python-dotenv
+pandas
+numpy
+
+# Language Models and Embeddings
 transformers
 sentence_transformers
-langchain_text_splitters
-langchain
 torch
-numpy
+langchain_text_splitters
+
+# API Clients for LLMs
 groq
-pandas
+openai
+
+# Text Processing and Web Scraping
 tqdm
 requests
 beautifulsoup4
-openai
+
+# Environment Variables and Utilities
+python-dotenv
+secrets

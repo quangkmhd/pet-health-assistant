@@ -1,25 +1,32 @@
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, make_response
 import lancedb
 import os
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
-import torch
+import secrets
 from groq import Groq
+from openai import OpenAI
 import requests
 import json
 from livereload import Server
+import datetime
+from system_prompt import get_system_prompt
 
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = "123"
+app.secret_key = os.getenv("FLASK_SECRET_KEY", secrets.token_hex(16))
 app.debug = True  
 
 
 groq_api_key = os.getenv("GROQ_API_KEY")
-client = Groq(api_key=groq_api_key)
+Groq_client = Groq(api_key=groq_api_key)
 
 openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+openrouter_client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY")
+)
 
 model = SentenceTransformer("intfloat/multilingual-e5-large")
 
@@ -32,118 +39,82 @@ def init_db():
     db = lancedb.connect("data/lancedb_clean")
     return db.open_table("petmart_data")
 
-def get_context(query, table, num_results=10):
+def get_context(query, table, num_results=5, similarity_threshold=0.7):
     query_embedding = get_query_embedding(query)
     
-    # Tìm kiếm trong bảng lancedb
+    # Tìm kiếm trong bảng lancedb với nhiều kết quả hơn để lọc
     results = table.search(query_embedding).limit(num_results).to_pandas()
     contexts = []
 
     for _, row in results.iterrows():
-        filename = row["metadata"].get("filename", "")
-        title = row["metadata"].get("title", "")
+        # Kiểm tra ngưỡng điểm tương đồng
+        # Lưu ý: Trong LanceDB, điểm L2 càng thấp càng giống nhau, nên chuyển đổi thành điểm cosine
+        # distance_score là L2 distance, chuyển sang cosine similarity: 1 - (distance_score/2)
+        similarity_score = 1 - (row['_distance']/2)
+        
+        # Chỉ sử dụng những kết quả có độ tương đồng trên ngưỡng
+        if similarity_score >= similarity_threshold:
+            filename = row["metadata"].get("filename", "")
+            title = row["metadata"].get("title", "")
 
-        # Tạo thông tin nguồn
-        source_parts = []
-        if filename:
-            source_parts.append(filename)
+            # Tạo thông tin nguồn
+            source_parts = []
+            if filename:
+                source_parts.append(filename)
 
-        source = f"\nNguồn: {' - '.join(source_parts)}"
-        if title:
-            source += f"\nTiêu đề: {title}"
+            source = f"\nNguồn: {' - '.join(source_parts)}"
+            if title:
+                source += f"\nTiêu đề: {title}"
 
-        contexts.append(f"{row['text']}{source}")
+            contexts.append(f"{row['text']}{source}")
 
+    # Nếu không có kết quả nào vượt ngưỡng, trả về chuỗi rỗng
+    if not contexts:
+        return ""
+        
     return "\n\n".join(contexts)
 
-def get_chat_response(messages, context, model_choice="groq"):
-
-    system_prompt = f"""
-    Bạn là một trợ lý thú y chuyên nghiệp và cố vấn sức khỏe vật nuôi giàu kinh nghiệm, đã hỗ trợ hàng ngàn chủ nuôi suốt 15 năm qua. 
-    Bạn giỏi lắng nghe, giải thích dễ hiểu, đưa ra các bước hành động cụ thể dựa trên kiến thức thú y cập nhật, có khả năng giải thích thân thiện như bác sĩ, 
-    đồng thời trình bày chuyên nghiệp như ChatGPT.
-
-🚩 Nhiệm vụ chính:
-Khi người dùng mô tả triệu chứng của thú cưng bằng tiếng Việt, hãy phản hồi bằng một bản chẩn đoán đầy đủ, trình bày đẹp mắt, chia phần rõ ràng bằng biểu tượng cảm xúc, giúp chủ nuôi:
-
-Hiểu rõ bệnh có thể là gì
-
-Biết nên xử lý thế nào tại nhà
-
-Nhận diện lúc nào cần đi khám gấp
-
-Nhận thêm các câu hỏi chuyên sâu nếu cần bổ sung thông tin
-
-🧠 Cách xử lý thông minh (áp dụng tự động):
-🔗 Chain-of-Thought reasoning để giải thích từng bước
-
-🧠 ReAct + Reflexion: Quan sát → Phân tích → Suy xét → Hiệu chỉnh
-
-📊 PAL-style logic để xử lý nhiều triệu chứng
-
-🧱 Prompt-chaining chia nhỏ tác vụ:
-
-Phân loại triệu chứng
-
-Liệt kê bệnh có thể
-
-Đánh giá rủi ro
-
-Khuyến nghị hành động rõ ràng
-
-📝 Cấu trúc phản hồi tiêu chuẩn (bắt buộc tuân thủ):
-Sử dụng gạch đầu dòng, biểu tượng cảm xúc, trình bày giống ChatGPT. Văn phong nhẹ nhàng như một người bác sĩ thú y tận tâm nói chuyện trực tiếp với chủ nuôi, 
-không sử dụng **, ## các kí tự đặc biệt khác ở đầu câu.
-
-🐶 Các bệnh có thể gặp:  
-1. [Tên bệnh 1] – 📈 Mức độ: Trung bình/Cao  
-   👉 Dấu hiệu: …  
-   👉 Vì sao có thể mắc: …  
-
-2. [Tên bệnh 2] – 📈 Mức độ: …  
-   👉 Dấu hiệu: …  
-   👉 Vì sao có thể mắc: …  
-
-3. [Tên bệnh 3] (nếu cần) – 📈 Mức độ: …  
-   👉 Dấu hiệu: …  
-   👉 Vì sao có thể mắc: …  
-
-📍 Vị trí có thể ảnh hưởng:  
-👀 Các biểu hiện đã ghi nhận:  
-🍽️ Tình trạng ăn uống:  
-💡 Nguyên nhân phổ biến:  
-🧼 Khuyến nghị chăm sóc:  
-🏠 Hướng dẫn chăm sóc tại nhà theo từng bước:  
-⏳ Thời gian hồi phục (ước tính):  
-🔁 Nguy cơ tái phát & cách phòng tránh:  
-🧑‍⚕️ Phác đồ điều trị phổ biến (theo từng khả năng bệnh):  
-🧑‍⚕️ Khi nào cần đến bác sĩ thú y:  
-💬 Lời khuyên:
-
-
-❓ Hảy trả lời câu hỏi sau đây để PET HEALTH biết thêm thông tin về bệnh để có thể đưa ra bệnh chính sác nhất:
-Dựa vào thông tin ban đầu, bạn cần đưa ra 10 câu hỏi dạng Có/Không giúp người dùng xác định xem PET có thể đang mắc một bệnh cụ thể nào đó. có ví dụ minh họa,:
-
-
-⚠️ Lưu ý quan trọng:
-Luôn đưa ra câu trả lời chi tiết đầy đủ, rõ ràng cho từng phần, không ngắn gọn, không bao giờ đoán bừa. Nếu nghi ngờ, hãy khuyên đi khám.
-Luôn viết bằng ngôn ngữ gần gũi, giải thích dễ hiểu.
-Phản hồi phải trông "xịn" như một bác sĩ, nhưng dễ tiếp cận như người bạn đáng tin cậy.
-🔍 Luôn nhấn mạnh bạn không thay thế bác sĩ thú y thực thụ. Điều chỉnh phản hồi theo từng loài (chó, mèo, v.v.).
-    
-    Ngữ cảnh:
-    {context}
-    """
+def get_chat_response(messages, context, model_choice="groq", pet_info=None):
+    # Lấy system prompt từ file system_prompt.py
+    system_prompt = get_system_prompt(context)
 
     formatted_messages = [{"role": "system", "content": system_prompt}]
     
-    for message in messages:
+    # Thêm thông tin thú cưng vào formatted_messages nếu có
+    if pet_info:
+        pet_info_summary = "THÔNG TIN THÚ CƯNG:\n"
+        if pet_info.get('pet_name'):
+            pet_info_summary += f"- Tên: {pet_info['pet_name']}\n"
+        if pet_info.get('pet_type'):
+            pet_info_summary += f"- Loài: {pet_info['pet_type']}\n"
+        if pet_info.get('pet_breed'):
+            pet_info_summary += f"- Giống: {pet_info['pet_breed']}\n"
+        if pet_info.get('pet_age'):
+            pet_info_summary += f"- Tuổi: {pet_info['pet_age']}\n"
+        if pet_info.get('pet_weight'):
+            pet_info_summary += f"- Cân nặng: {pet_info['pet_weight']} kg\n"
+        if pet_info.get('pet_gender'):
+            pet_info_summary += f"- Giới tính: {pet_info['pet_gender']}\n"
+        if pet_info.get('pet_health_history'):
+            pet_info_summary += f"- Tiền sử bệnh: {pet_info['pet_health_history']}\n"
+        if pet_info.get('pet_diet'):
+            pet_info_summary += f"- Chế độ ăn: {pet_info['pet_diet']}\n"
+        
+        # Thêm thông tin thú cưng vào formatted_messages
+        formatted_messages.append({"role": "system", "content": pet_info_summary})
+    
+    # Thêm lịch sử chat với role tương ứng (user hoặc assistant)
+    for message in messages[:-1]:  # Bỏ qua tin nhắn cuối cùng vì sẽ được xử lý riêng
         formatted_messages.append({"role": message["role"], "content": message["content"]})
+    
+    # Thêm tin nhắn hiện tại của người dùng vào role user
+    if messages and messages[-1]["role"] == "user":
+        formatted_messages.append({"role": "user", "content": messages[-1]["content"]})
     
     try:
         if model_choice == "groq":
             # Sử dụng mô hình Llama-3.3-70b của Groq (nhanh hơn nhưng tốn phí)
-            response = client.chat.completions.create(
+            response = Groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=formatted_messages,
                 temperature=0.1,
@@ -152,31 +123,16 @@ Phản hồi phải trông "xịn" như một bác sĩ, nhưng dễ tiếp cận
             )
             return response.choices[0].message.content
             
-        else:  # model_choice == "openrouter"
-            # Sử dụng mô hình DeepSeek Chat của OpenRouter.ai (chậm hơn nhưng miễn phí)
-            headers = {
-                "Authorization": f"Bearer {openrouter_api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            data = {
-                "model": "deepseek/deepseek-chat-v3-0324:free",
-                "messages": formatted_messages,
-                "temperature": 0.1,
-                "max_tokens": 2048,
-                "top_p": 1.0
-            }
-            
-            response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                data=json.dumps(data)
+        elif model_choice == "openrouter":
+            # Sử dụng mô hình DeepSeek Chat của OpenRouter.ai
+            response = openrouter_client.chat.completions.create(
+                model="deepseek/deepseek-chat-v3-0324:free",
+                messages=formatted_messages,
+                temperature=0.1,
+                max_tokens=2048,
+                top_p=1.0,
             )
-            
-            if response.status_code == 200:
-                return response.json()["choices"][0]["message"]["content"]
-            else:
-                return f"Error when calling OpenRouter API: {response.status_code} - {response.text}"
+            return response.choices[0].message.content
                 
     except Exception as e:
         return f"Error when calling API: {str(e)}"
@@ -199,7 +155,69 @@ def index():
     # Khởi tạo tùy chọn mô hình trong session nếu chưa có
     if 'model_choice' not in session:
         session['model_choice'] = 'groq'  # Mặc định là Groq
+    
+    # Kiểm tra xem có thông tin thú cưng trong cookie không
+    pet_info_cookie = request.cookies.get('pet_info')
+    if pet_info_cookie and 'pet_info' not in session:
+        try:
+            # Giải mã JSON từ cookie và lưu vào session
+            pet_info = json.loads(pet_info_cookie)
+            session['pet_info'] = pet_info
+        except:
+            # Nếu có lỗi giải mã, bỏ qua
+            pass
+    
     return render_template('index.html', model_choice=session['model_choice'])
+
+@app.route('/pet-info', methods=['GET', 'POST'])
+def pet_info():
+    """Hiển thị trang thông tin thú cưng"""
+    # Nếu đã có thông tin thú cưng trong session, hiển thị lại
+    pet_info = session.get('pet_info', None)
+    return render_template('pet_info.html', pet_info=pet_info)
+
+@app.route('/save-pet-info', methods=['POST'])
+def save_pet_info():
+    """Lưu thông tin thú cưng vào session và cookie"""
+    # Lấy dữ liệu từ form
+    pet_info = {
+        'owner_name': request.form.get('owner_name', ''),
+        'pet_name': request.form.get('pet_name', ''),
+        'pet_type': request.form.get('pet_type', ''),
+        'pet_breed': request.form.get('pet_breed', ''),
+        'pet_age': request.form.get('pet_age', ''),
+        'pet_weight': request.form.get('pet_weight', ''),
+        'pet_gender': request.form.get('pet_gender', ''),
+        'pet_health_history': request.form.get('pet_health_history', ''),
+        'pet_diet': request.form.get('pet_diet', '')
+    }
+    
+    # Lưu vào session
+    session['pet_info'] = pet_info
+    
+    # Tạo response và thiết lập cookie
+    response = make_response(redirect(url_for('index')))
+    
+    # Thiết lập thời gian hết hạn cho cookie (1 năm)
+    expire_date = datetime.datetime.now() + datetime.timedelta(days=365)
+    
+    # Lưu thông tin thú cưng vào cookie
+    response.set_cookie('pet_info', json.dumps(pet_info), expires=expire_date)
+    
+    return response
+
+@app.route('/clear-pet-info', methods=['POST'])
+def clear_pet_info():
+    """Xóa thông tin thú cưng khỏi session và cookie"""
+    # Xóa khỏi session
+    if 'pet_info' in session:
+        session.pop('pet_info')
+    
+    # Tạo response và xóa cookie
+    response = make_response(redirect(url_for('index')))
+    response.set_cookie('pet_info', '', expires=0)  # Xóa cookie bằng cách đặt thời gian hết hạn là 0
+    
+    return response
 
 @app.route('/about')
 def about():
@@ -251,8 +269,17 @@ def chat():
     # Lấy ngữ cảnh từ cơ sở dữ liệu
     context = get_context(query, table)
     
-    # Lấy phản hồi từ mô hình đã chọn
-    response = get_chat_response(chat_history + [{"role": "user", "content": query}], context, model_choice)
+    # Lấy thông tin thú cưng từ session nếu có
+    pet_info = session.get('pet_info')
+    
+    # Giới hạn lịch sử tin nhắn để tiết kiệm token (chỉ lấy 5 tin nhắn gần nhất)
+    recent_history = chat_history[-5:] if len(chat_history) > 5 else chat_history
+    
+    # Thêm tin nhắn hiện tại của người dùng vào lịch sử
+    messages = recent_history + [{"role": "user", "content": query}]
+    
+    # Lấy phản hồi từ mô hình đã chọn, truyền thêm thông tin thú cưng
+    response = get_chat_response(messages, context, model_choice, pet_info)
     
     # Cập nhật lịch sử phiên chat
     if 'chat_history' not in session:
