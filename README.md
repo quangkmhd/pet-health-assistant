@@ -105,22 +105,6 @@ Pet Health/
   <p><i>Pet information management</i></p>
 </div>
 
-## 🔧 Advanced Customization
-
-### Changing the Embedding Model
-Pet Health uses the `intfloat/multilingual-e5-large` model as default. To change it:
-
-1. Open the `3-embedding.py` file
-2. Change the `model_name` variable to another model compatible with SentenceTransformer
-3. Run the embedding process again
-
-### Changing the Number of Search Results
-By default, Pet Health returns the 5 most relevant results. To adjust:
-
-1. Open the `app.py` file
-2. In the `get_context()` function, change the `num_results=5` parameter
-3. Restart the application
-
 ### 🔄 Transform into a Different Chatbot
 You can easily convert Pet Health into any other type of chatbot by:
 
